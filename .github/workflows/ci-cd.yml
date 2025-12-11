@@ -1,0 +1,206 @@
+name: CI-CD
+
+on:
+  push:
+    branches: ["cicdTest"]
+  pull_request:
+    branches: ["cicdTest"]
+
+jobs:
+  # ============================================================
+  # Detect FE / BE changes
+  # ============================================================
+  detect_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      fe: ${{ steps.filter.outputs.fe }}
+      be: ${{ steps.filter.outputs.be }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            fe:
+              - "apps/frontend/**"
+            be:
+              - "apps/backend/**"
+
+  # ============================================================
+  # FRONTEND PIPELINE (Build + Deploy)
+  # ============================================================
+  fe_pipeline:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.fe == 'true'
+    runs-on: ubuntu-latest
+
+    strategy:
+      max-parallel: 1
+      matrix:
+        host:
+          - ${{ secrets.FE_HOST_1 }}
+          - ${{ secrets.FE_HOST_2 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: fe-npm-${{ hashFiles('apps/frontend/package-lock.json') }}
+          restore-keys: |
+            fe-npm-
+
+      - name: Build Frontend
+        run: |
+          cd apps/frontend
+          npm ci
+          npm run build:production
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo -e "Host *\n\tStrictHostKeyChecking=no" > ~/.ssh/config
+
+      # 🚀 [추가됨] 서버에 Node / npm 설치 자동화
+      - name: Prepare Server (Node.js)
+        run: |
+          echo "🛠 Preparing server for FE: ${{ matrix.host }}"
+
+          ssh ubuntu@${{ matrix.host }} "\
+            set -e;
+
+            echo '📌 Updating apt...';
+            sudo apt-get update -y;
+
+            if ! command -v node >/dev/null 2>&1; then
+              echo '📦 Installing Node.js 20...';
+              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -;
+              sudo apt-get install -y nodejs;
+            else
+              echo '✅ Node already installed:';
+              node -v;
+            fi
+
+            if ! command -v npm >/dev/null 2>&1; then
+              echo '📦 Installing npm...';
+              sudo apt-get install -y npm;
+            else
+              echo '✅ npm already installed:';
+              npm -v;
+            fi
+
+            mkdir -p /home/ubuntu/frontend /home/ubuntu/frontend/.next
+          "
+
+      - name: Deploy FE to ${{ matrix.host }}
+        run: |
+          echo "🚀 Deploying FE to ${{ matrix.host }}"
+
+          rsync -avz --delete apps/frontend/.next/standalone/ ubuntu@${{ matrix.host }}:/home/ubuntu/frontend/
+          rsync -avz --delete apps/frontend/.next/static ubuntu@${{ matrix.host }}:/home/ubuntu/frontend/.next/
+          rsync -avz --delete apps/frontend/public ubuntu@${{ matrix.host }}:/home/ubuntu/frontend/
+          rsync -avz apps/frontend/restart.sh ubuntu@${{ matrix.host }}:/home/ubuntu/frontend/
+
+          ssh ubuntu@${{ matrix.host }} "\
+            cd /home/ubuntu/frontend && \
+            chmod +x restart.sh && \
+            ./restart.sh \
+          "
+
+          echo "✅ FE deployed on ${{ matrix.host }}"
+
+  # ============================================================
+  # BACKEND PIPELINE (Build + Deploy)
+  # ============================================================
+  be_pipeline:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.be == 'true'
+    runs-on: ubuntu-latest
+
+    strategy:
+      max-parallel: 1
+      matrix:
+        host:
+          - ${{ secrets.BE_HOST_1 }}
+          - ${{ secrets.BE_HOST_2 }}
+          - ${{ secrets.BE_HOST_3 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cache Maven repo
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ hashFiles('apps/backend/pom.xml') }}
+          restore-keys: |
+            mvn-
+
+      - name: Build Backend (JAR)
+        run: |
+          cd apps/backend
+          ./mvnw clean package -DskipTests
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo -e "Host *\n\tStrictHostKeyChecking=no" > ~/.ssh/config
+
+      # 🚀 [추가됨] 서버에 Java 자동 설치
+      - name: Prepare Server (Java)
+        run: |
+          echo "🛠 Preparing server for BE: ${{ matrix.host }}"
+
+          ssh ubuntu@${{ matrix.host }} "\
+            set -e;
+
+            echo '📌 Updating apt...';
+            sudo apt-get update -y;
+
+            if ! command -v java >/dev/null 2>&1; then
+              echo '📦 Installing Java 21...';
+              sudo apt-get install -y openjdk-21-jre;
+            else
+              echo '✅ Java already installed:';
+              java -version;
+            fi
+
+            mkdir -p /home/ubuntu/backend/target
+          "
+
+      - name: Deploy Backend to ${{ matrix.host }}
+        run: |
+          echo "🚀 Deploying Backend JAR to ${{ matrix.host }}"
+
+          rsync -avz apps/backend/target/target/ktb-chat-backend-0.0.1-SNAPSHOT.jar \
+            ubuntu@${{ matrix.host }}:/home/ubuntu/backend/target/
+
+          rsync -avz apps/backend/app-control.sh \
+            ubuntu@${{ matrix.host }}:/home/ubuntu/backend/
+
+          ssh ubuntu@${{ matrix.host }} "chmod +x /home/ubuntu/backend/app-control.sh"
+
+          ssh ubuntu@${{ matrix.host }} "\
+            cd /home/ubuntu/backend && \
+            ./app-control.sh restart \
+          "
+
+          echo "✅ Backend deployed on ${{ matrix.host }}"
