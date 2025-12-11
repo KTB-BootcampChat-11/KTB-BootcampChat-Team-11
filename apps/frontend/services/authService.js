@@ -219,44 +219,49 @@ class AuthService {
   /**
    * 비밀번호 변경 API 호출
    */
-  async changePassword(currentPassword, newPassword, token, sessionId) {
-    try {
-      if (!token) {
-        throw new Error('인증 정보가 없습니다.');
-      }
-
-      const response = await axios.put(
-        `${API_URL}/api/users/profile`,
-        {
-          currentPassword,
-          newPassword
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-auth-token': token,
-            'x-session-id': sessionId
+  async changePassword(currentPassword, newPassword, token, sessionId, name) {
+      try {
+          if (!token) {
+              throw new Error('인증 정보가 없습니다.');
           }
-        }
-      );
 
-      if (response.data?.success) {
-        return true;
+          if (!name) {
+              throw new Error('이름 정보가 필요합니다.');
+          }
+
+          const response = await axios.put(
+              `${API_URL}/api/users/profile`,
+              {
+                  name,                      // 백엔드 필수
+                  newPassword,               // 사용자가 입력한 새 비밀번호
+                  confirmPassword: newPassword   // confirmPassword도 필요
+              },
+              {
+                  headers: {
+                      'Content-Type': 'application/json',
+                      'x-auth-token': token,
+                      'x-session-id': sessionId
+                  }
+              }
+          );
+
+          if (response.data?.success) {
+              return true;
+          }
+
+          throw new Error(response.data?.message || '비밀번호 변경에 실패했습니다.');
+
+      } catch (error) {
+          if (error.response?.status === 401) {
+              if (error.response.data?.message?.includes('비밀번호가 일치하지 않습니다')) {
+                  throw new Error('현재 비밀번호가 일치하지 않습니다.');
+              }
+              throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
+          }
+
+          throw this._handleError(error);
       }
-
-      throw new Error(response.data?.message || '비밀번호 변경에 실패했습니다.');
-
-    } catch (error) {
-      if (error.response?.status === 401) {
-        if (error.response.data?.message?.includes('비밀번호가 일치하지 않습니다')) {
-          throw new Error('현재 비밀번호가 일치하지 않습니다.');
-        }
-        throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
-      }
-
-      throw this._handleError(error);
-    }
-  }  
+  }
 
   /**
    * @deprecated getCurrentUser는 더 이상 사용하지 않습니다.

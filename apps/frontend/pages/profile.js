@@ -57,7 +57,8 @@ const Profile = () => {
           '',
           formData.newPassword,
           user.token,
-          user.sessionId
+          user.sessionId,
+          formData.name
         );
       }
 
