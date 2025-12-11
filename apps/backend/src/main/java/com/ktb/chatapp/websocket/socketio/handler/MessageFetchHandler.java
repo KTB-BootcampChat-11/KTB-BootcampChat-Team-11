@@ -35,19 +35,17 @@ public class MessageFetchHandler {
         if (userId == null) {
             client.sendEvent(ERROR, Map.of(
                     "code", "UNAUTHORIZED",
-                    "message", "인증이 필요합니다."
-            ));
+                    "message", "인증이 필요합니다."));
             return;
         }
-        
+
         try {
             // 권한 체크
             Room room = roomRepository.findById(data.roomId()).orElse(null);
             if (room == null || !room.getParticipantIds().contains(userId)) {
                 client.sendEvent(ERROR, Map.of(
                         "code", "LOAD_ERROR",
-                        "message", "채팅방 접근 권한이 없습니다."
-                ));
+                        "message", "채팅방 접근 권한이 없습니다."));
                 return;
             }
 
@@ -58,25 +56,23 @@ public class MessageFetchHandler {
 
             log.debug("Loading messages for room {}", data.roomId());
             FetchMessagesResponse result = messageLoader.loadMessages(data, userId);
-            
+
             log.debug("Previous messages loaded - room: {}, count: {}, hasMore: {}",
                     data.roomId(), result.getMessages().size(),
                     result.isHasMore());
-            
+
             client.sendEvent(PREVIOUS_MESSAGES_LOADED, result);
 
         } catch (Exception e) {
             log.error("Error handling fetchPreviousMessages", e);
             client.sendEvent(ERROR, Map.of(
                     "code", "LOAD_ERROR",
-                    "message", e.getMessage() != null ?
-                            e.getMessage() : "이전 메시지를 불러오는 중 오류가 발생했습니다."
-            ));
+                    "message", e.getMessage() != null ? e.getMessage() : "이전 메시지를 불러오는 중 오류가 발생했습니다."));
         }
     }
 
     private String getUserId(SocketIOClient client) {
         var user = (SocketUser) client.get("user");
-        return user.id();
+        return user != null ? user.id() : null;
     }
 }
