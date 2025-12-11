@@ -46,7 +46,6 @@ import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.*;
 public class ChatMessageHandler {
     private final SocketIOServer socketIOServer;
     private final MessageRepository messageRepository;
-    private final RoomRepository roomRepository;
     private final FileRepository fileRepository;
     private final AiService aiService;
     private final SessionService sessionService;

@@ -15,6 +15,7 @@ import com.ktb.chatapp.service.SessionService;
 import com.ktb.chatapp.service.SessionValidationResult;
 import com.ktb.chatapp.util.BannedWordChecker;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
+import com.ktb.chatapp.websocket.socketio.UserRooms;
 import com.ktb.chatapp.websocket.socketio.ai.AiService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -36,74 +37,85 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class ChatMessageHandlerTest {
 
-    @Mock private SocketIOServer socketIOServer;
-    @Mock private MessageRepository messageRepository;
-    @Mock private RoomRepository roomRepository;
-    @Mock private UserRepository userRepository;
-    @Mock private FileRepository fileRepository;
-    @Mock private AiService aiService;
-    @Mock private SessionService sessionService;
-    @Mock private BannedWordChecker bannedWordChecker;
-    @Mock private RateLimitService rateLimitService;
-    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
+        @Mock
+        private SocketIOServer socketIOServer;
+        @Mock
+        private MessageRepository messageRepository;
+        @Mock
+        private RoomRepository roomRepository;
+        @Mock
+        private UserRepository userRepository;
+        @Mock
+        private FileRepository fileRepository;
+        @Mock
+        private AiService aiService;
+        @Mock
+        private SessionService sessionService;
+        @Mock
+        private BannedWordChecker bannedWordChecker;
+        @Mock
+        private RateLimitService rateLimitService;
+        private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
-    private ChatMessageHandler handler;
+        @Mock
+        private UserRooms userRooms;
 
-    @BeforeEach
-    void setUp() {
-        handler =
-                new ChatMessageHandler(
-                        socketIOServer,
-                        messageRepository,
-                        roomRepository,
-                        userRepository,
-                        fileRepository,
-                        aiService,
-                        sessionService,
-                        bannedWordChecker,
-                        rateLimitService,
-                        meterRegistry);
-    }
+        private ChatMessageHandler handler;
 
-    @Test
-    void handleChatMessage_blocksMessagesContainingBannedWords() {
-        SocketIOClient client = mock(SocketIOClient.class);
-        SocketUser socketUser = new SocketUser("user-1", "tester", "session-1", "socket-1");
-        when(client.get("user")).thenReturn(socketUser);
+        @BeforeEach
+        void setUp() {
+                handler = new ChatMessageHandler(
+                                socketIOServer,
+                                messageRepository,
+                                fileRepository,
+                                aiService,
+                                sessionService,
+                                bannedWordChecker,
+                                rateLimitService,
+                                meterRegistry,
+                                userRooms);
+        }
 
-        SessionValidationResult validResult = SessionValidationResult.valid(null);
-        when(sessionService.validateSession(socketUser.id(), socketUser.authSessionId()))
-                .thenReturn(validResult);
+        @Test
+        void handleChatMessage_blocksMessagesContainingBannedWords() {
+                SocketIOClient client = mock(SocketIOClient.class);
+                SocketUser socketUser = new SocketUser("user-1", "tester", "email", "profileImage", "session-1",
+                                "socket-1");
+                when(client.get("user")).thenReturn(socketUser);
 
-        RateLimitCheckResult allowedResult = RateLimitCheckResult.allowed(10000, 9999, 60, System.currentTimeMillis() / 1000 + 60, 60);
-        when(rateLimitService.checkRateLimit(eq(socketUser.id()), anyInt(), any()))
-                .thenReturn(allowedResult);
+                SessionValidationResult validResult = SessionValidationResult.valid(null);
+                when(sessionService.validateSession(socketUser.id(), socketUser.authSessionId()))
+                                .thenReturn(validResult);
 
-        User user = new User();
-        user.setId("user-1");
-        when(userRepository.findById("user-1")).thenReturn(Optional.of(user));
+                RateLimitCheckResult allowedResult = RateLimitCheckResult.allowed(10000, 9999, 60,
+                                System.currentTimeMillis() / 1000 + 60, 60);
+                when(rateLimitService.checkRateLimit(eq(socketUser.id()), anyInt(), any()))
+                                .thenReturn(allowedResult);
 
-        Room room = new Room();
-        room.setId("room-1");
-        room.setParticipantIds(new HashSet<>(java.util.List.of("user-1")));
-        when(roomRepository.findById("room-1")).thenReturn(Optional.of(room));
+                User user = new User();
+                user.setId("user-1");
+                when(userRepository.findById("user-1")).thenReturn(Optional.of(user));
 
-        ChatMessageRequest request =
-                ChatMessageRequest.builder()
-                        .room("room-1")
-                        .type("text")
-                        .content("bad word")
-                        .build();
+                Room room = new Room();
+                room.setId("room-1");
+                room.setParticipantIds(new HashSet<>(java.util.List.of("user-1")));
+                when(roomRepository.findById("room-1")).thenReturn(Optional.of(room));
 
-        when(bannedWordChecker.containsBannedWord("bad word")).thenReturn(true);
+                ChatMessageRequest request = ChatMessageRequest.builder()
+                                .room("room-1")
+                                .type("text")
+                                .content("bad word")
+                                .build();
 
-        handler.handleChatMessage(client, request);
+                when(bannedWordChecker.containsBannedWord("bad word")).thenReturn(true);
 
-        ArgumentCaptor<Map<String, String>> payloadCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(client).sendEvent(eq(ERROR), payloadCaptor.capture());
-        Map<String, String> payload = payloadCaptor.getValue();
-        org.junit.jupiter.api.Assertions.assertEquals("MESSAGE_REJECTED", payload.get("code"));
-        verifyNoInteractions(messageRepository);
-        verify(socketIOServer, never()).getRoomOperations(any());
-    }
+                handler.handleChatMessage(client, request);
+
+                ArgumentCaptor<Map<String, String>> payloadCaptor = ArgumentCaptor.forClass(Map.class);
+                verify(client).sendEvent(eq(ERROR), payloadCaptor.capture());
+                Map<String, String> payload = payloadCaptor.getValue();
+                org.junit.jupiter.api.Assertions.assertEquals("MESSAGE_REJECTED", payload.get("code"));
+                verifyNoInteractions(messageRepository);
+                verify(socketIOServer, never()).getRoomOperations(any());
+        }
 }
