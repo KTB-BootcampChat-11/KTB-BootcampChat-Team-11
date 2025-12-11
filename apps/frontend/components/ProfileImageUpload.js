@@ -25,12 +25,14 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
   };
 
   // 프로필 이미지 URL 생성
-  const getProfileImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    return imagePath.startsWith('http') ?
-      imagePath :
-      `${process.env.NEXT_PUBLIC_API_URL}${imagePath}`;
-  };
+    const getProfileImageUrl = (imagePath) => {
+        if (!imagePath) return null;
+
+        if (imagePath.startsWith("http")) return imagePath;
+
+        const base = process.env.NEXT_PUBLIC_S3_BASE_URL;
+        return `${base.replace(/\/$/, '')}/${imagePath.replace(/^\//, '')}`;
+    };
 
   // 컴포넌트 마운트 시 이미지 설정
   useEffect(() => {
