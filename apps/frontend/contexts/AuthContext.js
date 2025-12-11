@@ -17,7 +17,7 @@ export const useAuth = () => {
 };
 
 const SESSION_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours
-const TOKEN_VERIFICATION_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const TOKEN_VERIFICATION_INTERVAL = 60 * 60 * 1000; // 60 minutes
 
 /**
  * AuthProvider: 전역 인증 상태 관리
@@ -95,7 +95,7 @@ export const AuthProvider = ({ children }) => {
       return;
     }
 
-    // 5분마다 세션 타임아웃 체크
+    // 60분마다 세션 타임아웃 체크
     sessionCheckInterval.current = setInterval(() => {
       const currentUser = loadUserFromStorage();
       if (!currentUser) {
@@ -104,7 +104,7 @@ export const AuthProvider = ({ children }) => {
         socketService.disconnect();
         router.replace('/');
       }
-    }, 5 * 60 * 1000);
+    }, 60 * 60 * 1000);
 
     return () => {
       if (sessionCheckInterval.current) {

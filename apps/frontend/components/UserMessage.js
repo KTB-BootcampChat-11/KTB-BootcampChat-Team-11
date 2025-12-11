@@ -6,13 +6,15 @@ import CustomAvatar from './CustomAvatar';
 import ReadStatus from './ReadStatus';
 
 const UserMessage = ({
-  msg = {}, 
-  isMine = false, 
+  msg = {},
+  isMine = false,
   currentUser = null,
   onReactionAdd,
   onReactionRemove,
   room = null,
-  socketRef
+  socketRef,
+  showAvatar = true,
+  showName = true,
 }) => {
   // 메시지 DOM 요소에 대한 ref 생성
   const messageDomRef = useRef(null);
@@ -35,19 +37,21 @@ const UserMessage = ({
         gap="$100"
         align={isMine ? 'flex-end' : 'flex-start'}
       >
-        {/* Sender Info */}
-        <HStack gap="$100" alignItems="center" className="px-1">
-          <CustomAvatar
-            user={user}
-            size="lg"
-            persistent
-            showInitials
-          />
-          <span className="text-sm font-medium text-gray-300">
-            {isMine ? '나' : msg.sender?.name}
-          </span>
-        </HStack>
-
+        {showAvatar && (
+          <HStack gap="$100" alignItems="center" className="px-1 mb-1">
+            <CustomAvatar
+              user={user}
+              size="lg"
+              persistent
+              showInitials
+            />
+            {showName && (
+              <span className="text-sm font-medium text-gray-300">
+                {isMine ? '나' : msg.sender?.name}
+              </span>
+            )}
+          </HStack>
+        )}
         {/* Message Bubble - Outline Based */}
         <div className={`
           relative group
@@ -110,8 +114,8 @@ UserMessage.defaultProps = {
   msg: {},
   isMine: false,
   currentUser: null,
-  onReactionAdd: () => {},
-  onReactionRemove: () => {},
+  onReactionAdd: () => { },
+  onReactionRemove: () => { },
   room: null
 };
 

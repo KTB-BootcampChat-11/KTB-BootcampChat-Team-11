@@ -37,9 +37,9 @@ const ChatMessages = ({
   room = null,
   loadingMessages = false,
   hasMoreMessages = true,
-  onReactionAdd = () => {},
-  onReactionRemove = () => {},
-  onLoadMore = () => {},
+  onReactionAdd = () => { },
+  onReactionRemove = () => { },
+  onLoadMore = () => { },
   socketRef
 }) => {
   // 무한 스크롤 훅
@@ -58,9 +58,9 @@ const ChatMessages = ({
   );
   const isMine = useCallback((msg) => {
     if (!msg?.sender || !currentUser?.id) return false;
-    
+
     return (
-      msg.sender._id === currentUser.id || 
+      msg.sender._id === currentUser.id ||
       msg.sender.id === currentUser.id ||
       msg.sender === currentUser.id
     );
@@ -75,7 +75,7 @@ const ChatMessages = ({
     });
   }, [messages]);
 
-  const renderMessage = useCallback((msg, idx) => {
+  const renderMessage = useCallback((msg, idx, prevMsg) => {
     if (!msg) return null;
 
     const commonProps = {
@@ -90,13 +90,51 @@ const ChatMessages = ({
       file: FileMessage
     }[msg.type] || UserMessage;
 
+    const mine = msg.type !== 'system' ? isMine(msg) : undefined;
+
+    // 🔹 UserMessage일 때만 연속 메시지 판단해서 showAvatar/showName 결정
+    if (MessageComponent === UserMessage) {
+      const prevSenderId = prevMsg?.sender
+        ? (prevMsg.sender._id || prevMsg.sender.id || prevMsg.sender)
+        : null;
+
+      const currSenderId = msg.sender
+        ? (msg.sender._id || msg.sender.id || msg.sender)
+        : null;
+
+      const isSameSenderAsPrev =
+        prevMsg &&
+        prevMsg.type !== 'system' &&
+        prevSenderId &&
+        currSenderId &&
+        prevSenderId === currSenderId;
+
+      const showAvatar = !isSameSenderAsPrev;
+      const showName = !isSameSenderAsPrev;
+
+      return (
+        <UserMessage
+          key={msg._id || `msg-${idx}`}
+          {...commonProps}
+          msg={msg}
+          content={msg.content}
+          isMine={mine}
+          isStreaming={msg.type === 'ai' ? (msg.isStreaming || false) : undefined}
+          socketRef={socketRef}
+          showAvatar={showAvatar}
+          showName={showName}
+        />
+      );
+    }
+
+    // system / file 메시지는 기존대로
     return (
       <MessageComponent
         key={msg._id || `msg-${idx}`}
         {...commonProps}
         msg={msg}
         content={msg.content}
-        isMine={msg.type !== 'system' ? isMine(msg) : undefined}
+        isMine={mine}
         isStreaming={msg.type === 'ai' ? (msg.isStreaming || false) : undefined}
         socketRef={socketRef}
       />
