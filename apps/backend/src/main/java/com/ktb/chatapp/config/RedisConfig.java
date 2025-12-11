@@ -60,13 +60,15 @@ public class RedisConfig {
     @Bean
     public RedissonClient redissonClient(
             @Value("${spring.data.redis.host}") String host,
-            @Value("${spring.data.redis.port}") int port
+            @Value("${spring.data.redis.port}") int port,
+            @Value("${spring.data.redis.password}") String password
     ) {
         Config config = new Config();
         config.useSingleServer()
                 .setAddress("redis://" + host + ":" + port)
                 .setConnectionMinimumIdleSize(3)
-                .setConnectionPoolSize(10);
+                .setConnectionPoolSize(10)
+                .setPassword(password);
 
         return Redisson.create(config);
     }
