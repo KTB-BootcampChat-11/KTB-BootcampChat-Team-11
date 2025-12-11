@@ -20,9 +20,8 @@ import jakarta.validation.Valid;
 import java.security.Principal;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -266,37 +265,66 @@ public class RoomController {
         }
     }
 
-    private RoomResponse mapToRoomResponse(Room room, String name) {
-        User creator = userRepository.findById(room.getCreator()).orElse(null);
-        if (creator == null) {
-            throw new RuntimeException("Creator not found for room " + room.getId());
+    private RoomResponse mapToRoomResponse(Room room, String currentUserEmail) {
+
+        // 1. Participant IDs → List 변환 + 정렬 (순서 안정성)
+        List<String> participantIds = room.getParticipantIds() != null
+                ? room.getParticipantIds().stream().sorted().toList()
+                : Collections.emptyList();
+
+        // 2. Creator + Participants → 한 번에 조회(N+1 제거)
+        Set<String> userIds = new HashSet<>();
+        if (room.getCreator() != null) {
+            userIds.add(room.getCreator());
         }
+        userIds.addAll(participantIds);
+
+        Map<String, User> userMap = userIds.isEmpty()
+                ? Collections.emptyMap()
+                : userRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(User::getId, u -> u));
+
+        // 3. Creator 검증 + 로깅
+        String creatorId = room.getCreator();
+        User creator = userMap.get(creatorId);
+
+        if (creator == null) {
+            log.error("Creator not found: roomId={}, creatorId={}", room.getId(), creatorId);
+            throw new IllegalStateException("Invalid room state: creator not found");
+        }
+
         UserResponse creatorSummary = UserResponse.from(creator);
-        List<UserResponse> participantSummaries = room.getParticipantIds()
-                .stream()
-                .map(userRepository::findById).peek(optUser -> {
-                    if (optUser.isEmpty()) {
-                        log.warn("Participant not found: roomId={}, userId={}", room.getId(), optUser);
+
+        // 4. Participants 변환
+        List<UserResponse> participantSummaries = participantIds.stream()
+                .map(id -> {
+                    User user = userMap.get(id);
+                    if (user == null) {
+                        log.warn("Participant not found: roomId={}, userId={}", room.getId(), id);
                     }
+                    return user;
                 })
-                .filter(Optional::isPresent)
-                .map(Optional::get)
+                .filter(Objects::nonNull)
                 .map(UserResponse::from)
                 .toList();
 
-        boolean isCreator = room.getCreator().equals(name);
+        // 5. Creator 여부 판단
+        boolean isCreator = creatorId.equals(currentUserEmail);
 
-        // 최근 10분간 메시지 수 조회
+        // 6. 최근 메시지 수 조회
         LocalDateTime tenMinutesAgo = LocalDateTime.now().minusMinutes(10);
         long recentMessageCount = messageRepository.countRecentMessagesByRoomId(room.getId(), tenMinutesAgo);
 
+        // 7. DTO 생성
         return RoomResponse.builder()
                 .id(room.getId())
                 .name(room.getName())
                 .hasPassword(room.isHasPassword())
                 .creator(creatorSummary)
                 .participants(participantSummaries)
-                .createdAtDateTime(room.getCreatedAt() != null ? room.getCreatedAt() : LocalDateTime.now())
+                .createdAtDateTime(
+                        room.getCreatedAt() != null ? room.getCreatedAt() : LocalDateTime.now()
+                )
                 .isCreator(isCreator)
                 .recentMessageCount((int) recentMessageCount)
                 .build();
