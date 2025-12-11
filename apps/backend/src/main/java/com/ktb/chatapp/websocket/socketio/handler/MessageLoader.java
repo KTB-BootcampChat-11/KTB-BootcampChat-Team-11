@@ -39,7 +39,8 @@ public class MessageLoader {
      */
     public FetchMessagesResponse loadMessages(FetchMessagesRequest data, String userId) {
         try {
-            return loadMessagesInternal(data.roomId(), data.limit(BATCH_SIZE), data.before(LocalDateTime.now()), userId);
+            return loadMessagesInternal(data.roomId(), data.limit(BATCH_SIZE), data.before(LocalDateTime.now()),
+                    userId);
         } catch (Exception e) {
             log.error("Error loading initial messages for room {}", data.roomId(), e);
             return FetchMessagesResponse.builder()
@@ -54,21 +55,18 @@ public class MessageLoader {
             int limit,
             LocalDateTime before,
             String userId) {
-        Pageable pageable = PageRequest.of(0, limit, Sort.by("timestamp").descending());
+        Pageable pageable = PageRequest.of(0, limit, Sort.by("timestamp").ascending());
 
         Page<Message> messagePage = messageRepository
                 .findByRoomIdAndIsDeletedAndTimestampBefore(roomId, false, before, pageable);
 
         List<Message> messages = messagePage.getContent();
 
-        // DESC로 조회했으므로 ASC로 재정렬 (채팅 UI 표시 순서)
-        List<Message> sortedMessages = messages.reversed();
-        
-        var messageIds = sortedMessages.stream().map(Message::getId).toList();
+        var messageIds = messages.stream().map(Message::getId).toList();
         messageReadStatusService.updateReadStatus(messageIds, userId);
-        
+
         // 메시지 응답 생성
-        List<MessageResponse> messageResponses = sortedMessages.stream()
+        List<MessageResponse> messageResponses = messages.stream()
                 .map(message -> {
                     var user = findUserById(message.getSenderId());
                     return messageResponseMapper.mapToMessageResponse(message, user);
