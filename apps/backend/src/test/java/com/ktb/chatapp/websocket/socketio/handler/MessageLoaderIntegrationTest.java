@@ -10,6 +10,7 @@ import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.repository.MessageRepository;
 import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.service.MessageReadStatusService;
+import com.ktb.chatapp.service.RedisMessageService;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -49,11 +50,14 @@ class MessageLoaderIntegrationTest {
     @MockitoSpyBean
     private MessageReadStatusService messageReadStatusService;
 
+    @MockitoSpyBean
+    private RedisMessageService redisMessageService;
+
     private MessageLoader messageLoader;
     private Faker faker;
     private String roomId;
     private String userId;
-    
+
     @BeforeEach
     void setUp() {
         faker = new Faker();
@@ -65,7 +69,8 @@ class MessageLoaderIntegrationTest {
                 messageRepository,
                 userRepository,
                 new MessageResponseMapper(fileRepository),
-                messageReadStatusService
+                messageReadStatusService,
+                redisMessageService
         );
 
         // 테스트 사용자 생성 및 저장

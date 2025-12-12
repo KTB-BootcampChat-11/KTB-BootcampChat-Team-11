@@ -8,14 +8,7 @@ import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.MessageRepository;
 import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.service.MessageReadStatusService;
-import jakarta.annotation.Nullable;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import com.ktb.chatapp.service.RedisMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -24,85 +17,84 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
-import static java.util.Collections.emptyList;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
-@Slf4j
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class MessageLoader {
 
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
     private final MessageResponseMapper messageResponseMapper;
     private final MessageReadStatusService messageReadStatusService;
+    private final RedisMessageService redisMessageService;
 
     private static final int BATCH_SIZE = 30;
 
-    /**
-     * 메시지 로드
-     */
     public FetchMessagesResponse loadMessages(FetchMessagesRequest data, String userId) {
-        try {
-            return loadMessagesInternal(data.roomId(), data.limit(BATCH_SIZE), data.before(LocalDateTime.now()),
-                    userId);
-        } catch (Exception e) {
-            log.error("Error loading initial messages for room {}", data.roomId(), e);
-            return FetchMessagesResponse.builder()
-                    .messages(emptyList())
-                    .hasMore(false)
-                    .build();
+
+        LocalDateTime before = data.before(LocalDateTime.now());
+        long beforeTs = before.toInstant(ZoneOffset.UTC).toEpochMilli();
+
+        // 1. Redis ZSET에서 메시지 ID 가져오기
+        List<String> cachedIds = redisMessageService.loadBefore(
+                data.roomId(), beforeTs, data.limit(BATCH_SIZE));
+
+        List<Message> messages;
+
+        if (cachedIds.size() == data.limit(BATCH_SIZE)) {
+            // 2. DB 조회 없이 messageId → DB findAllById
+            messages = messageRepository.findAllById(cachedIds);
+        } else {
+            // 3. 부족한 메시지만 DB에서 조회
+            int remaining = data.limit(BATCH_SIZE) - cachedIds.size();
+
+            Pageable pageable = PageRequest.of(0, remaining,
+                    Sort.by(Sort.Direction.DESC, "timestamp"));
+
+            Page<Message> page = messageRepository.findByRoomIdAndIsDeletedAndTimestampBefore(
+                    data.roomId(), false, before, pageable
+            );
+
+            List<Message> dbMessages = page.getContent();
+
+            // DB 메시지 → Redis에 추가
+            dbMessages.forEach(redisMessageService::addMessage);
+
+            // Redis 캐시와 DB 메시지를 합치기
+            messages = new ArrayList<>(messageRepository.findAllById(cachedIds));
+            messages.addAll(dbMessages);
+
+            messages.sort(Comparator.comparing(Message::getTimestamp));
         }
-    }
 
-    private FetchMessagesResponse loadMessagesInternal(
-            String roomId,
-            int limit,
-            LocalDateTime before,
-            String userId) {
-        Pageable pageable = PageRequest.of(0, limit, Sort.by("timestamp").ascending());
-
-        Page<Message> messagePage = messageRepository
-                .findByRoomIdAndIsDeletedAndTimestampBefore(roomId, false, before, pageable);
-
-        List<Message> messages = messagePage.getContent();
-
-        var messageIds = messages.stream().map(Message::getId).toList();
+        // 읽음 처리
+        List<String> messageIds = messages.stream().map(Message::getId).toList();
         messageReadStatusService.updateReadStatus(messageIds, userId);
+
+        // user 정보 로딩
         Set<String> senderIds = messages.stream()
                 .map(Message::getSenderId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
-        Map<String, User> userMap = userRepository.findAllById(senderIds).stream()
+        Map<String, User> userMap = userRepository.findAllById(senderIds)
+                .stream()
                 .collect(Collectors.toMap(User::getId, Function.identity()));
 
-        // 메시지 응답 생성
-        List<MessageResponse> messageResponses = messages.stream()
-                .map(message -> {
-                    User user = message.getSenderId() != null ? userMap.get(message.getSenderId()) : null;
-                    return messageResponseMapper.mapToMessageResponse(message, user);
-                }).toList();
-
-        boolean hasMore = messagePage.hasNext();
-
-        log.debug("Messages loaded - roomId: {}, limit: {}, count: {}, hasMore: {}",
-                roomId, limit, messageResponses.size(), hasMore);
+        // Response 매핑
+        List<MessageResponse> responses = messages.stream()
+                .map(m -> messageResponseMapper.mapToMessageResponse(m, userMap.get(m.getSenderId())))
+                .toList();
 
         return FetchMessagesResponse.builder()
-                .messages(messageResponses)
-                .hasMore(hasMore)
+                .messages(responses)
+                .hasMore(responses.size() == data.limit(BATCH_SIZE))
                 .build();
-    }
-
-    /**
-     * AI 경우 null 반환 가능
-     */
-    @Nullable
-    private User findUserById(String id) {
-        if (id == null) {
-            return null;
-        }
-        return userRepository.findById(id)
-                .orElse(null);
     }
 }
